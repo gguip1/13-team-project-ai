@@ -9,4 +9,4 @@ app = FastAPI(
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "service": "recommend"}
+    return {"status": "okㅅㄷㄴㅅㄴㅅㄴㄷㄴㅇㄹ", "service": "recommend"}
