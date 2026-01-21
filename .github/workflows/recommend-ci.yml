@@ -56,6 +56,22 @@ jobs:
       - name: Type check (mypy)
         run: mypy app --ignore-missing-imports
 
+      - name: Smoke test (health check)
+        run: |
+          set -euo pipefail
+          uvicorn app.main:app --host 127.0.0.1 --port 8000 > /tmp/uvicorn.log 2>&1 &
+          UVICORN_PID=$!
+          trap "kill $UVICORN_PID" EXIT
+          for i in 1 2 3 4 5; do
+            if curl -fsS http://127.0.0.1:8000/health > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Health check failed"
+          cat /tmp/uvicorn.log
+          exit 1
+
       - name: Run tests (pytest)
         run: pytest -q --maxfail=1 --disable-warnings || [ $? -eq 5 ]
 

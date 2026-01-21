@@ -25,6 +25,7 @@ jobs:
       }}
     runs-on: ubuntu-24.04-arm
     env:
+      REPO_URL: https://github.com/${{ github.repository }}.git
       REPO_PATH: /home/${{ secrets.SSH_USER }}/13-team-project-ai
       SERVICE_DIR: services/recommend
       VENV_PATH: /home/${{ secrets.SSH_USER }}/.venvs/recommend
@@ -43,17 +44,23 @@ jobs:
         run: |
           ssh -p "${{ secrets.SSH_PORT }}" \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            "REPO_PATH='${REPO_PATH}' SERVICE_DIR='${SERVICE_DIR}' VENV_PATH='${VENV_PATH}' DEPLOY_BRANCH='${DEPLOY_BRANCH}' RESTART_CMD='${RESTART_CMD}' bash -s" <<'EOF'
+            "REPO_URL='${REPO_URL}' REPO_PATH='${REPO_PATH}' SERVICE_DIR='${SERVICE_DIR}' VENV_PATH='${VENV_PATH}' DEPLOY_BRANCH='${DEPLOY_BRANCH}' RESTART_CMD='${RESTART_CMD}' bash -s" <<'EOF'
           set -euo pipefail
 
           if [ ! -d "$REPO_PATH/.git" ]; then
-            echo "Repo not found at $REPO_PATH. Clone it before running CD."
-            exit 1
+            if [ -e "$REPO_PATH" ]; then
+              echo "Path exists but is not a git repository: $REPO_PATH"
+              exit 1
+            fi
+            mkdir -p "$(dirname "$REPO_PATH")"
+            git clone --branch "$DEPLOY_BRANCH" --depth 1 "$REPO_URL" "$REPO_PATH"
+          else
+            cd "$REPO_PATH"
+            git fetch --prune origin
+            git reset --hard "origin/$DEPLOY_BRANCH"
           fi
 
           cd "$REPO_PATH"
-          git fetch --prune origin
-          git reset --hard "origin/$DEPLOY_BRANCH"
 
           cd "$SERVICE_DIR"
           if [ ! -d "$VENV_PATH" ]; then
