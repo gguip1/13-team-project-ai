@@ -25,7 +25,6 @@ jobs:
       }}
     runs-on: ubuntu-24.04-arm
     env:
-      REPO_URL: https://github.com/${{ github.repository }}.git
       REPO_PATH: /home/${{ secrets.SSH_USER }}/13-team-project-ai
       SERVICE_DIR: services/recommend
       VENV_PATH: /home/${{ secrets.SSH_USER }}/.venvs/recommend
@@ -44,39 +43,27 @@ jobs:
         run: |
           ssh -p "${{ secrets.SSH_PORT }}" \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            "REPO_URL='${REPO_URL}' REPO_PATH='${REPO_PATH}' SERVICE_DIR='${SERVICE_DIR}' VENV_PATH='${VENV_PATH}' DEPLOY_BRANCH='${DEPLOY_BRANCH}' RESTART_CMD='${RESTART_CMD}' bash -s" <<'EOF'
+            "REPO_PATH='${REPO_PATH}' SERVICE_DIR='${SERVICE_DIR}' VENV_PATH='${VENV_PATH}' DEPLOY_BRANCH='${DEPLOY_BRANCH}' RESTART_CMD='${RESTART_CMD}' bash -s" <<'EOF'
           set -euo pipefail
 
           if [ ! -d "$REPO_PATH/.git" ]; then
-            if [ -e "$REPO_PATH" ]; then
-              echo "Path exists but is not a git repository: $REPO_PATH"
-              exit 1
-            fi
-            mkdir -p "$(dirname "$REPO_PATH")"
-            git clone --branch "$DEPLOY_BRANCH" --depth 1 "$REPO_URL" "$REPO_PATH"
-          else
-            cd "$REPO_PATH"
-            git fetch --prune origin
-            git reset --hard "origin/$DEPLOY_BRANCH"
-          fi
-
-          cd "$REPO_PATH"
-
-          cd "$SERVICE_DIR"
-          if [ ! -f "$VENV_PATH/bin/activate" ]; then
-            mkdir -p "$(dirname "$VENV_PATH")"
-            python3.11 -m venv "$VENV_PATH"
-          fi
-
-          if [ ! -f "$VENV_PATH/bin/activate" ]; then
-            echo "Venv creation failed or incomplete at $VENV_PATH"
-            ls -la "$VENV_PATH" || true
+            echo "Repo not found at $REPO_PATH. Run provisioning first."
             exit 1
           fi
 
-          . "$VENV_PATH/bin/activate"
-          python3.11 -m pip install --upgrade pip
-          pip install -r requirements.txt
+          cd "$REPO_PATH"
+          git fetch --prune origin
+          git reset --hard "origin/$DEPLOY_BRANCH"
+
+          cd "$SERVICE_DIR"
+          VENV_PY="$VENV_PATH/bin/python"
+          if [ ! -x "$VENV_PY" ]; then
+            echo "Venv not found at $VENV_PATH. Run provisioning first."
+            exit 1
+          fi
+
+          "$VENV_PY" -m pip install --upgrade pip
+          "$VENV_PY" -m pip install -r requirements.txt
 
           if [ -n "$RESTART_CMD" ]; then
             eval "$RESTART_CMD"
