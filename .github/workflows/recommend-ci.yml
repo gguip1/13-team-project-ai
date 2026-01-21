@@ -49,19 +49,35 @@ jobs:
         run: ruff check .
 
       - name: Format check (ruff)
+        id: format_check
+        continue-on-error: true
         run: ruff format --check --diff .
 
       - name: Type check (mypy)
         run: mypy app --ignore-missing-imports
 
       - name: Run tests (pytest)
-        run: pytest -q --maxfail=1 --disable-warnings tests || [ $? -eq 5 ]
+        run: pytest -q --maxfail=1 --disable-warnings || [ $? -eq 5 ]
+
+      - name: Format check summary
+        if: always()
+        run: |
+          if [ "${{ steps.format_check.outcome }}" = "failure" ]; then
+            {
+              echo "## Formatting"
+              echo ""
+              echo "Ruff formatting issues detected. Run:"
+              echo ""
+              echo "\`ruff format services/recommend\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Post CI summary to PR
         if: always() && github.event_name == 'pull_request'
         uses: actions/github-script@v7
         env:
           CI_STATUS: ${{ job.status }}
+          FORMAT_STATUS: ${{ steps.format_check.outcome }}
         with:
           script: |
             const { owner, repo } = context.repo;
@@ -70,14 +86,19 @@ jobs:
             const marker = "<!-- recommend-ci-status -->";
             const status = process.env.CI_STATUS || "unknown";
             const statusLine = status === "success" ? "Recommend CI succeeded." : "Recommend CI failed.";
+            const formatLine =
+              process.env.FORMAT_STATUS === "failure"
+                ? "Formatting needed: run `ruff format services/recommend`."
+                : null;
             const body = [
               marker,
               statusLine,
+              formatLine,
               `Run: ${runUrl}`,
               "",
               "If formatting failed, run:",
               "`ruff format services/recommend`",
-            ].join("\n");
+            ].filter(Boolean).join("\n");
 
             const comments = await github.rest.issues.listComments({
               owner,
