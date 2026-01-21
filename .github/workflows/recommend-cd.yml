@@ -63,8 +63,15 @@ jobs:
           cd "$REPO_PATH"
 
           cd "$SERVICE_DIR"
-          if [ ! -d "$VENV_PATH" ]; then
+          if [ ! -f "$VENV_PATH/bin/activate" ]; then
+            mkdir -p "$(dirname "$VENV_PATH")"
             python3.11 -m venv "$VENV_PATH"
+          fi
+
+          if [ ! -f "$VENV_PATH/bin/activate" ]; then
+            echo "Venv creation failed or incomplete at $VENV_PATH"
+            ls -la "$VENV_PATH" || true
+            exit 1
           fi
 
           . "$VENV_PATH/bin/activate"
