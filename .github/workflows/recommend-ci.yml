@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 concurrency:
   group: recommend-ci-${{ github.workflow }}-${{ github.ref }}
@@ -48,10 +49,63 @@ jobs:
         run: ruff check .
 
       - name: Format check (ruff)
-        run: ruff format --check .
+        run: ruff format --check --diff .
 
       - name: Type check (mypy)
         run: mypy app --ignore-missing-imports
 
       - name: Run tests (pytest)
-        run: pytest -q --maxfail=1 --disable-warnings || [ $? -eq 5 ]
+        run: pytest -q --maxfail=1 --disable-warnings tests || [ $? -eq 5 ]
+
+      - name: Post CI summary to PR
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          CI_STATUS: ${{ job.status }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const prNumber = context.payload.pull_request.number;
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            const marker = "<!-- recommend-ci-status -->";
+            const status = process.env.CI_STATUS || "unknown";
+            const statusLine = status === "success" ? "Recommend CI succeeded." : "Recommend CI failed.";
+            const body = [
+              marker,
+              statusLine,
+              `Run: ${runUrl}`,
+              "",
+              "If formatting failed, run:",
+              "`ruff format services/recommend`",
+            ].join("\n");
+
+            const comments = await github.rest.issues.listComments({
+              owner,
+              repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+
+            const existing = comments.data.find(
+              (comment) =>
+                comment.user &&
+                comment.user.type === "Bot" &&
+                comment.body &&
+                comment.body.includes(marker),
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: prNumber,
+                body,
+              });
+            }
