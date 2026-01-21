@@ -7,11 +7,13 @@ on:
     paths:
       - "services/recommend/**"
       - ".github/workflows/recommend-ci.yml"
+      - ".github/workflows/recommend-cd.yml"
   push:
     branches: [main, develop]
     paths:
       - "services/recommend/**"
       - ".github/workflows/recommend-ci.yml"
+      - ".github/workflows/recommend-cd.yml"
 
 permissions:
   contents: read
