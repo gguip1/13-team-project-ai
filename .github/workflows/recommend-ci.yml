@@ -22,7 +22,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  integration:
+  ci:
     runs-on: ubuntu-24.04-arm
     defaults:
       run:
@@ -95,26 +95,36 @@ jobs:
           TYPE="${{ steps.typecheck.outcome }}"
           TEST="${{ steps.test.outcome }}"
 
-          curl -sf -X POST "$WEBHOOK" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"embeds\": [{
-                \"title\": \"$TITLE\",
-                \"description\": \"$DESC\",
-                \"color\": $COLOR,
-                \"fields\": [
-                  {\"name\": \"이벤트\", \"value\": \"$EVENT\", \"inline\": true},
-                  {\"name\": \"대상\", \"value\": \"$REF\", \"inline\": true},
-                  {\"name\": \"빌드\", \"value\": \"#$RUN_NUM\", \"inline\": true},
-                  {\"name\": \"Lint\", \"value\": \"$LINT\", \"inline\": true},
-                  {\"name\": \"Format\", \"value\": \"$FORMAT\", \"inline\": true},
-                  {\"name\": \"Type\", \"value\": \"$TYPE\", \"inline\": true},
-                  {\"name\": \"Test\", \"value\": \"$TEST\", \"inline\": true},
-                  {\"name\": \"상세\", \"value\": \"[Actions 로그]($RUN_URL)\", \"inline\": false}
+          jq -n \
+            --arg title "$TITLE" \
+            --arg desc "$DESC" \
+            --arg color "$COLOR" \
+            --arg event "$EVENT" \
+            --arg ref "$REF" \
+            --arg run_num "$RUN_NUM" \
+            --arg lint "$LINT" \
+            --arg format "$FORMAT" \
+            --arg type "$TYPE" \
+            --arg test "$TEST" \
+            --arg url "$RUN_URL" \
+            '{
+              embeds: [{
+                title: $title,
+                description: $desc,
+                color: ($color | tonumber),
+                fields: [
+                  {name: "이벤트", value: $event, inline: true},
+                  {name: "대상", value: $ref, inline: true},
+                  {name: "빌드", value: ("#" + $run_num), inline: true},
+                  {name: "Lint", value: $lint, inline: true},
+                  {name: "Format", value: $format, inline: true},
+                  {name: "Type", value: $type, inline: true},
+                  {name: "Test", value: $test, inline: true},
+                  {name: "상세", value: ("[Actions 로그](" + $url + ")"), inline: false}
                 ],
-                \"footer\": {
-                  \"text\": \"AI Recommend CI\",
-                  \"icon_url\": \"https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png\"
+                footer: {
+                  text: "AI Recommend CI",
+                  icon_url: "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png"
                 }
               }]
-            }"
+            }' | curl -sf -X POST "$WEBHOOK" -H "Content-Type: application/json" -d @-
