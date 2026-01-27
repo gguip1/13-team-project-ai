@@ -16,10 +16,7 @@ concurrency:
 
 jobs:
   cd:
-    if: ${{ 
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push'
-    }}
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
     runs-on: ubuntu-24.04-arm
     env:
       REPO_PATH: /home/${{ secrets.SSH_USER }}/13-team-project-ai
