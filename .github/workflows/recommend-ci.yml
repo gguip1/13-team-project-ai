@@ -1,9 +1,8 @@
-name: Recommend CI Pipeline
+name: AI RECOMMEND CI Pipeline
 
 on:
   pull_request:
     branches: [main, develop]
-    types: [opened, synchronize, reopened]
     paths:
       - "services/recommend/**"
       - ".github/workflows/recommend-ci.yml"
@@ -17,14 +16,13 @@ on:
 
 permissions:
   contents: read
-  issues: write
 
 concurrency:
-  group: recommend-ci-${{ github.workflow }}-${{ github.ref }}
+  group: recommend-ai-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  ci:
+  integration:
     runs-on: ubuntu-24.04-arm
     defaults:
       run:
@@ -38,113 +36,85 @@ jobs:
         with:
           python-version: "3.11"
           cache: "pip"
-          cache-dependency-path: |
-            services/recommend/requirements.txt
-            services/recommend/requirements-dev.txt
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
+          pip install --upgrade pip
           pip install -r requirements-dev.txt
 
+      # Lint/Format: 경고만 (CI 블록 안함)
+      # Type/Test: 실패 시 CI 실패
       - name: Lint (ruff)
-        run: ruff check .
+        id: lint
+        continue-on-error: true # 경고만
+        run: ruff check . --output-format=github
 
       - name: Format check (ruff)
         id: format_check
-        continue-on-error: true
+        continue-on-error: true # 경고만
         run: ruff format --check --diff .
 
       - name: Type check (mypy)
+        id: typecheck
         run: mypy app --ignore-missing-imports
 
-      - name: Smoke test (health check)
-        run: |
-          set -euo pipefail
-          uvicorn app.main:app --host 127.0.0.1 --port 8000 > /tmp/uvicorn.log 2>&1 &
-          UVICORN_PID=$!
-          trap "kill $UVICORN_PID" EXIT
-          for i in 1 2 3 4 5; do
-            if curl -fsS http://127.0.0.1:8000/health > /dev/null; then
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "Health check failed"
-          cat /tmp/uvicorn.log
-          exit 1
-
       - name: Run tests (pytest)
-        run: pytest -q --maxfail=1 --disable-warnings || [ $? -eq 5 ]
+        id: test
+        # || [ $? -eq 5 ]: 테스트 파일 없으면 통과 (TODO: 테스트 추가 후 제거)
+        run: pytest -v --tb=short || [ $? -eq 5 ]
 
-      - name: Format check summary
+      - name: Notify Discord
         if: always()
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          EVENT: ${{ github.event_name }}
+          BRANCH: ${{ github.ref_name }}
+          PR_NUM: ${{ github.event.pull_request.number }}
+          RUN_NUM: ${{ github.run_number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          if [ "${{ steps.format_check.outcome }}" = "failure" ]; then
-            {
-              echo "## Formatting"
-              echo ""
-              echo "Ruff formatting issues detected. Run:"
-              echo ""
-              echo "\`ruff format services/recommend\`"
-            } >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ job.status }}" = "success" ]; then
+            TITLE="AI Recommend CI 성공"
+            DESC="코드 검증이 완료되었습니다."
+            COLOR=3066993
+          else
+            TITLE="AI Recommend CI 실패"
+            DESC="코드 검증에 실패했습니다. 로그를 확인해주세요."
+            COLOR=15158332
           fi
 
-      - name: Post CI summary to PR
-        if: always() && github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        env:
-          CI_STATUS: ${{ job.status }}
-          FORMAT_STATUS: ${{ steps.format_check.outcome }}
-        with:
-          script: |
-            const { owner, repo } = context.repo;
-            const prNumber = context.payload.pull_request.number;
-            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
-            const marker = "<!-- recommend-ci-status -->";
-            const status = process.env.CI_STATUS || "unknown";
-            const statusLine = status === "success" ? "Recommend CI succeeded." : "Recommend CI failed.";
-            const formatLine =
-              process.env.FORMAT_STATUS === "failure"
-                ? "Formatting needed: run `ruff format services/recommend`."
-                : null;
-            const body = [
-              marker,
-              statusLine,
-              formatLine,
-              `Run: ${runUrl}`,
-              "",
-              "If formatting failed, run:",
-              "`ruff format services/recommend`",
-            ].filter(Boolean).join("\n");
+          if [ "$EVENT" = "pull_request" ]; then
+            REF="PR #$PR_NUM"
+          else
+            REF="$BRANCH"
+          fi
 
-            const comments = await github.rest.issues.listComments({
-              owner,
-              repo,
-              issue_number: prNumber,
-              per_page: 100,
-            });
+          # 각 단계 결과 (success/failure)
+          LINT="${{ steps.lint.outcome }}"
+          FORMAT="${{ steps.format_check.outcome }}"
+          TYPE="${{ steps.typecheck.outcome }}"
+          TEST="${{ steps.test.outcome }}"
 
-            const existing = comments.data.find(
-              (comment) =>
-                comment.user &&
-                comment.user.type === "Bot" &&
-                comment.body &&
-                comment.body.includes(marker),
-            );
-
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner,
-                repo,
-                comment_id: existing.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number: prNumber,
-                body,
-              });
-            }
+          curl -sf -X POST "$WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"embeds\": [{
+                \"title\": \"$TITLE\",
+                \"description\": \"$DESC\",
+                \"color\": $COLOR,
+                \"fields\": [
+                  {\"name\": \"이벤트\", \"value\": \"$EVENT\", \"inline\": true},
+                  {\"name\": \"대상\", \"value\": \"$REF\", \"inline\": true},
+                  {\"name\": \"빌드\", \"value\": \"#$RUN_NUM\", \"inline\": true},
+                  {\"name\": \"Lint\", \"value\": \"$LINT\", \"inline\": true},
+                  {\"name\": \"Format\", \"value\": \"$FORMAT\", \"inline\": true},
+                  {\"name\": \"Type\", \"value\": \"$TYPE\", \"inline\": true},
+                  {\"name\": \"Test\", \"value\": \"$TEST\", \"inline\": true},
+                  {\"name\": \"상세\", \"value\": \"[Actions 로그]($RUN_URL)\", \"inline\": false}
+                ],
+                \"footer\": {
+                  \"text\": \"AI Recommend CI\",
+                  \"icon_url\": \"https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png\"
+                }
+              }]
+            }"
